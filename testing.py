@@ -2,21 +2,45 @@ import tensorflow as tf
 import os
 from dataloader import ACREDataset
 
-from test_main_no_log import scnn, core, controller, cce, scnn_state, core_state
+#from test_main_no_log import scnn, core, controller, cce, scnn_state, core_state
+from SpikingCNN import SpikingCNN
+from abeera_SpikingRNN import CustomALIF, spike_function
+from Controller import Controller
+
 
 import tensorflow as tf 
 import losses as ls
 import sonnet as snt
 import numpy as np
 
-batch_size = 5
+# Initialisation
+n_kernel_1 = 8
+n_kernel_2 = 8
+n_stride_1 = 4
+n_stride_2 = 4
+n_filters_2 = 32
+
+n_w_1 = (128 - n_kernel_1) // n_stride_1 + 2
+n_w_2 = (n_w_1 - n_kernel_2) // n_stride_2 + 1
+n_inputs = n_w_2 * n_w_2 * n_filters_2
+
 n_time = 10
+rnn_units = 100
+learning_rate = 1e-4
+n_actions = 3
+epsilon = 1.
+batch_size = 5
 
 n_context = 6
 n_query   = 4
 
 test_dataloader = ACREDataset(5, 'test')
 n_test_batches = test_dataloader.n_batches
+
+scnn = SpikingCNN()
+scnn_checkpoint_path = "scnn/scnn.ckpt"
+scnn.load_weights(scnn_checkpoint_path.format(epoch=0))
+
 
 
 test_losses = []  # To store the losses during testing

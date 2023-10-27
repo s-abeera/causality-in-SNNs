@@ -2,7 +2,7 @@ import os
 from dataloader import ACREDataset
 
 from SpikingCNN import SpikingCNN
-from SpikingRNN import CustomALIF, spike_function
+from abeera_SpikingRNN import CustomALIF, spike_function
 from Controller import Controller
 
 import tensorflow as tf 
@@ -78,8 +78,7 @@ for n_x in range(n_batches):
 			logits, action, baseline = controller(core_output[0])
 			print('logits: ', logits)
 			print('action: ', action)
-			value_targets = cce(labels[:,t], tf.cast(action, tf.float32))
-			
+			value_targets = cce(tf.one_hot(labels[:,t],depth=n_actions), tf.one_hot(action, depth=n_actions))
 			advantages = value_targets - baseline
 			
 			loss,loss_for_cnn = ls.calc_losses(logits, action, 
