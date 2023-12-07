@@ -4,18 +4,16 @@ import numpy as np
 import tensorflow as tf
 
 from utils import spike_function 
+import time
 
-Cell = tf.compat.v1.nn.rnn_cell.BasicRNNCell
+CustomALIFStateTuple = namedtuple('CustomALIFStateTuple', ('s', 'z', 'r'))
 
-#CustomALIFStateTuple = namedtuple('CustomALIFStateTuple', ('s', 'z', 'r'))
-
-
-class CustomALIF(Cell):
+class CustomALIF(tf.keras.Model):
 	def __init__(self, n_in, n_rec, tau=20., thr=0.03, dt=1., dtype=tf.float32, dampening_factor=0.3,
 				 tau_adaptation=200., beta=1.6, stop_gradients=False, w_in_init=None, w_rec_init=None,
 				 n_refractory=5, w_scale=1.):
-		#super(CustomALIF, self).__init__()
-				 
+		super(CustomALIF, self).__init__()
+
 		self.n_refractory = n_refractory
 		self.tau_adaptation = tau_adaptation
 		self.beta = beta
@@ -46,31 +44,29 @@ class CustomALIF(Cell):
 		init_w_in_var = w_in_init if w_in_init is not None else \
 			(np.random.randn(n_in, n_rec) / np.sqrt(n_in)).astype(np.float32)
 		init_w_in_var *= w_scale
-		#self.w_in_var = tf.compat.v1.get_variable("InputWeight", initializer=init_w_in_var, dtype=dtype)
-		self.w_in_var = tf.convert_to_tensor(init_w_in_var, dtype=tf.float32)
-		self.w_in_val = tf.convert_to_tensor(init_w_in_var, dtype=tf.float32)
+		self.w_in_var = tf.Variable(name ='InputWeights', initial_value=init_w_in_var, dtype=dtype, trainable=True)
+		self.w_in_val = self.w_in_var
 
 		init_w_rec_var = w_rec_init if w_rec_init is not None else \
 			(np.random.randn(n_rec, n_rec) / np.sqrt(n_rec)).astype(np.float32)
 		init_w_rec_var *= w_scale
-		self.w_rec_val = tf.convert_to_tensor(init_w_rec_var, dtype=tf.float32)
-		self.w_rec_var = tf.convert_to_tensor(init_w_rec_var, dtype=tf.float32)
+		self.w_rec_var = tf.Variable(name='RecWeights', initial_value=init_w_rec_var, dtype=dtype, trainable=True)
+		self.w_rec_val = self.w_rec_var
+		
+		self.recurrent_disconnect_mask = tf.linalg.diag(np.ones(n_rec, dtype=bool))
+		self.w_rec_val = tf.where(self.recurrent_disconnect_mask, tf.zeros_like(self.w_rec_var), self.w_rec_var)  # Disconnect autotapse
+		
+		dw_val_dw_var_in = tf.ones((n_in, self._num_units))
+		dw_val_dw_var_rec = tf.ones((self._num_units, self._num_units)) - tf.linalg.diag(tf.ones(self._num_units))
+		self.dw_val_dw_var = [dw_val_dw_var_in, dw_val_dw_var_rec]
 
-		self.recurrent_disconnect_mask = np.diag(np.ones(n_rec, dtype=bool))
-
-		self.w_rec_val = tf.compat.v1.where(self.recurrent_disconnect_mask, tf.zeros_like(self.w_rec_val),self.w_rec_val)  # Disconnect autotapse
-
-		dw_val_dw_var_in = np.ones((n_in,self._num_units))
-		dw_val_dw_var_rec = np.ones((self._num_units,self._num_units)) - np.diag(np.ones(self._num_units))
-		self.dw_val_dw_var = [dw_val_dw_var_in,dw_val_dw_var_rec]
-
-		self.variable_list = [self.w_in_var,self.w_rec_var]
+		self.variable_list = [self.w_in_var, self.w_rec_var]
 		self.built = True
 
 	@property
 	def state_size(self):
 		return CustomALIFStateTuple(s=tf.TensorShape((self.n_rec, 2)), z=self.n_rec, r=self.n_rec)
-
+		 
 	@property
 	def output_size(self):
 		return [self.n_rec, tf.TensorShape((self.n_rec, 2)), tf.TensorShape((1,)), tf.TensorShape((1,))]
@@ -82,9 +78,10 @@ class CustomALIF(Cell):
 		z0 = tf.zeros(shape=(batch_size, n_rec), dtype=dtype)
 		r0 = tf.zeros(shape=(batch_size, n_rec), dtype=dtype)
 
-		return s0, z0, r0
+		return CustomALIFStateTuple(s=s0, z=z0, r=r0)
 
 	def compute_z(self, v, b):
+		
 		adaptive_thr = self.thr + b * self.beta
 		v_scaled = (v - adaptive_thr) / self.thr
 		z = spike_function(v_scaled, self.dampening_factor)
@@ -94,32 +91,32 @@ class CustomALIF(Cell):
 	def __call__(self, inputs, state, scope=None, dtype=tf.float32):
 		decay = self._decay
 
-		z = state[1]
-		s = state[0]
+		z = state.z
+		s = state.s
 		v, b = s[..., 0], s[..., 1]
 
-		is_refractory = tf.greater(state[-1], .1)
-		zeros_like_spikes = tf.zeros_like(state[1])
+		is_refractory = tf.greater(state.r, .1)
+		zeros_like_spikes = tf.zeros_like(state.z)
 		old_z = z
 
-		#if self.stop_gradients:
-		#	z = tf.stop_gradient(z)
+		if self.stop_gradients:
+			z = tf.stop_gradient(z)
 
 		new_b = self.decay_b * b + old_z
 
-		i_t = tf.matmul(inputs, self.w_in_val) + tf.matmul(z, self.w_rec_val)
+		i_t = tf.matmul(inputs, self.w_in_var) + tf.matmul(z, self.w_rec_var)
 		I_reset = z * self.thr * self.dt
 		new_v = decay * v + i_t - I_reset
 
 		# Spike generation
-		new_z = tf.compat.v1.where(is_refractory, zeros_like_spikes, self.compute_z(new_v, new_b))
-		new_r = tf.stop_gradient(tf.clip_by_value(state[2] + self.n_refractory * new_z - 1,
-												  0., float(self.n_refractory)))
+		new_z = tf.where(is_refractory, zeros_like_spikes, self.compute_z(new_v, new_b))
+		new_r = tf.stop_gradient(tf.clip_by_value(state.r + self.n_refractory * new_z - 1, 
+						0., float(self.n_refractory)))
 		new_s = tf.stack((new_v, new_b), axis=-1)
-
-		new_state = [new_s, new_z, new_r]
+		
+		new_state = CustomALIFStateTuple(s=new_s, z=new_z, r=new_r)
+				
 		return [new_z, new_s, tf.zeros_like(new_z[:, :1]), tf.zeros_like(new_z[:, :1])], new_state
-
 
 class CustomALIFWithReset(CustomALIF):
 	def __call__(self, inputs, state, scope=None, dtype=tf.float32):
@@ -138,3 +135,4 @@ class CustomALIFWithReset(CustomALIF):
 		new_z, new_s, _unused_1, _unused_2 = output
 
 		return [new_z, new_s, _unused_1, _unused_2], new_state
+	
