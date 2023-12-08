@@ -9,6 +9,23 @@ import time
 CustomALIFStateTuple = namedtuple('CustomALIFStateTuple', ('s', 'z', 'r'))
 
 class CustomALIF(tf.keras.Model):
+	"""
+	CustomALIF is a custom implementation of the Adaptive Leaky Integrate-and-Fire (ALIF) neuron model.
+	
+	Args:
+		n_in (int): Number of input units.
+		n_rec (int): Number of recurrent units.
+		tau (float or tf.Tensor): Membrane time constant(s) of the recurrent units. If a scalar value is provided,
+								 it will be broadcasted to all units. Default is 20.0.
+		thr (float or tf.Tensor): Firing threshold(s) of the recurrent units. If a scalar value is provided,
+								  it will be broadcasted to all units. Default is 0.03.
+		dt (float): Time step size. Default is 1.0.
+		dampening_factor (float): Dampening factor for the spike function. Default is 0.3.
+		tau_adaptation (float): Time constant for the adaptation current. Default is 200.0.
+		beta (float): Scaling factor for the adaptation current. Default is 1.6.
+		n_refractory (int): Number of time steps for the refractory period. Default is 5.
+		w_scale (float): Scaling factor for the weight initialization. Default is 1.0.
+	"""
 	def __init__(self, n_in, n_rec, tau=20., thr=0.03, dt=1., dtype=tf.float32, dampening_factor=0.3,
 				 tau_adaptation=200., beta=1.6, stop_gradients=False, w_in_init=None, w_rec_init=None,
 				 n_refractory=5, w_scale=1.):

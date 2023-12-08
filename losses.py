@@ -6,12 +6,11 @@ def compute_baseline_loss(advantages):
 
 
 def compute_entropy_loss(logits):
-	
 	policy = tf.nn.softmax(logits)
 	log_policy = tf.nn.log_softmax(logits)
-	
+
 	entropy = -policy * log_policy
-	negentropy = tf.reduce_sum(-entropy,1)
+	negentropy = tf.reduce_sum(-entropy, 1)
 
 	return negentropy
 
@@ -23,7 +22,20 @@ def compute_policy_gradient_loss(logits, actions, advantages):
 	return tf.reduce_sum(policy_gradient_loss_per_timestep, 1)
 
 def compute_reg_loss(scnn_output, core_output):
-	
+	"""
+	Compute the regularization loss for a given scnn_output and core_output.
+
+	Args:
+		scnn_output (Tensor): The output of the CNN component.
+		core_output (Tensor): The output of the RNN component.
+
+	Returns:
+		Tensor: The regularization loss.
+
+	Raises:
+		None
+	"""
+
 	# RNN Componenets
 	thr = 1.0
 	rate_cost = 50.
@@ -41,7 +53,7 @@ def compute_reg_loss(scnn_output, core_output):
 	voltage_reg_rnn += tf.reduce_sum(tf.reduce_mean(tf.square(rnn_neg), 1))
 	rnn_rate = tf.reduce_mean(core_output[0], (0, 1))
 	rnn_mean_rate = tf.reduce_mean(rnn_rate)
-	rate_loss = tf.reduce_sum(tf.square(rnn_rate - .02)) * 1.	
+	rate_loss = tf.reduce_sum(tf.square(rnn_rate - .02)) * 1.
 
 	# CNN Componenets
 	conv1_z = scnn_output[0]
@@ -72,11 +84,11 @@ def compute_reg_loss(scnn_output, core_output):
 		voltage_reg += tf.reduce_sum(tf.square(tf.reduce_mean(conv_neg, (0, 1))))
 	elif voltage_reg_method == 'avg_time':
 		voltage_reg += tf.reduce_sum(tf.reduce_mean(tf.square(tf.reduce_mean(conv_pos, 1)), 0))
-		voltage_reg += tf.reduce_sum(tf.reduce_mean(tf.square(tf.reduce_mean(conv_neg, 1)), 0))	
+		voltage_reg += tf.reduce_sum(tf.reduce_mean(tf.square(tf.reduce_mean(conv_neg, 1)), 0))
 
 	reg_loss = rate_loss * rate_cost
 	reg_loss += voltage_cost_rnn * voltage_reg_rnn
-	reg_loss += voltage_cost_cnn * voltage_reg		
+	reg_loss += voltage_cost_cnn * voltage_reg
 
 	return reg_loss
 	
